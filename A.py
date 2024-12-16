@@ -3,7 +3,6 @@ import threading
 import time
 from queue import PriorityQueue
 
-
 # Configuration
 DEST_IP = "192.168.43.222"
 INT_IP = "20.20.20.20"
@@ -17,6 +16,7 @@ packet_buffer = PriorityQueue()
 # Shared resources
 pending_acks = {}  # Dictionary to track unacknowledged packets
 ack_lock = threading.Lock()
+write_lock = threading.Lock()
 stop_threads = threading.Event()
 
 
@@ -30,10 +30,12 @@ def send_packet(packet_id, chunk):
     with ack_lock:
         pending_acks[packet_id] = time.time()
 
+
 def send_ack(packet):
     packet_id = packet[IP].id  # Use IP ID field
     ack_packet = IP(dst=packet[IP].src, id=packet_id) / b"ACK"
     send(ack_packet, verbose=0)
+
 
 # Thread 1 - Packet Listener
 def packet_listener():
@@ -43,10 +45,12 @@ def packet_listener():
 
             packet_buffer.put((packet_id, packet))
             packet.show()
-            #send_ack(packet)
-            #print(f"ack for packet {packet_id} sent.")
+            # send_ack(packet)
+            # print(f"ack for packet {packet_id} sent.")
 
-    sniff(filter=f"ip and src host {INT_IP}", prn=packet_handler, store=False, stop_filter=lambda _: stop_threads.is_set())
+    sniff(filter=f"ip and src host {INT_IP}", prn=packet_handler, store=False,
+          stop_filter=lambda _: stop_threads.is_set())
+
 
 def listen_for_acks():
     def ack_handler(packet):
@@ -71,8 +75,18 @@ def resend_packets():
                     print(f"Resending packet with ID: {packet_id}")
 
 
+def write_packet_to_file(packet):
+    with write_lock:
+        with open(FILE_PATH2, 'a') as f:
+            # Write the packet content to the file (raw data of the inner payload)
+            inner_packet = packet[IP].payload
+            if inner_packet.haslayer(Raw):
+                f.write(inner_packet[Raw].load.decode())
+            else:
+                f.write("No Raw Data\n")
+
+
 def packet_sender():
-    """Continuously send packets."""
     with open(FILE_PATH1, 'r') as file:
         data = file.read()
 
@@ -87,18 +101,21 @@ def packet_sender():
 
 if __name__ == "__main__":
     sender_thread = threading.Thread(target=packet_sender, daemon=True)
-    #ack_listener_thread = threading.Thread(target=listen_for_acks, daemon=True)
-    receiver_thread= threading.Thread(target=packet_listener, daemon=True)
+    # ack_listener_thread = threading.Thread(target=listen_for_acks, daemon=True)
+    receiver_thread = threading.Thread(target=packet_listener, daemon=True)
     # resend_thread = threading.Thread(target=resend_packets, daemon=True)
 
     sender_thread.start()
-    #ack_listener_thread.start()
+    # ack_listener_thread.start()
     receiver_thread.start()
     # resend_thread.start()
 
     try:
         while True:
-            pass
+            # Process packets from the buffer and write to file in order
+            if not packet_buffer.empty():
+                packet_id, packet = packet_buffer.get()
+                write_packet_to_file(packet)
     except KeyboardInterrupt:
         print("Stopping sender threads...")
         stop_threads.set()
