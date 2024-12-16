@@ -1,7 +1,13 @@
-from scapy.all import sniff, send, IP
+from scapy.all import sniff, send, IP, bind_layers, Raw
 import threading
 from queue import PriorityQueue
 import time 
+from rely_on_me import ReliableProtocol
+
+
+bind_layers(IP, ReliableProtocol, proto=253)  # Use an unused protocol number like 253
+bind_layers(ReliableProtocol, IP)
+
 # Shared resources
 packet_buffer = PriorityQueue()
 buffer_lock = threading.Lock()
@@ -46,15 +52,17 @@ def process_packet(packet_id, packet):
     print(f"Processing packet with ID: {packet_id}")
     #packet.show()
     inner_packet = packet[IP].payload
-    if inner_packet.haslayer(IP):
+    real_inner_packet = packet[ReliableProtocol].payload
+    if real_inner_packet.haslayer(IP):
         # Extract the inner packet
-        inner_ip_packet = inner_packet[IP]
+        inner_ip_packet = real_inner_packet[IP]
         inner_payload = inner_ip_packet.payload
         
         print(f"Received data: {inner_payload}")
-        inner_packet.show()
-        send(inner_packet)
+        real_inner_packet.show()
+        send(real_inner_packet)
         print("inner packet sent")
+
         
 
 # Main function to start threads
