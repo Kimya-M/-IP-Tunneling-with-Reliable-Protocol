@@ -1,7 +1,19 @@
-from scapy.all import IP, send, sniff, Raw
+from scapy.all import IP, send, sniff, Raw, bind_layers
 import threading
 import time
 from queue import PriorityQueue
+from rely_on_me import ReliableProtocol
+
+bind_layers(IP, ReliableProtocol, proto=253)
+#bind_layers( ReliableProtocol, Raw)
+
+
+# def reliable_protocol_next_layer(packet):
+#     if Raw in packet:
+#         return Raw
+#     else:
+#         return IP
+
 
 # Configuration
 DEST_IP = "192.168.43.222"
@@ -20,31 +32,34 @@ write_lock = threading.Lock()
 stop_threads = threading.Event()
 
 
-def send_packet(packet_id, chunk):
-    inner_packet = IP(src=INT_IP, dst=SRC_IP, id=packet_id) / Raw(load=chunk)
-    outer_packet = IP(src=SRC_IP, dst=DEST_IP, id=packet_id) / inner_packet
+def send_packet(seq_num, chunk, no_more):
+    inner_packet = IP(src=INT_IP, dst=SRC_IP, id=seq_num) / ReliableProtocol(seq_num=seq_num, no_more=no_more) / Raw(
+        load=chunk)
+    # inner_packet.show()
+    outer_packet = IP(src=SRC_IP, dst = DEST_IP, id = seq_num, proto= 253) / ReliableProtocol(seq_num=seq_num,no_more=no_more) / inner_packet
     send(outer_packet, verbose=0)
-    print(f"Sent packet with ID: {packet_id}")
+    # print(f"Sent packet with ID: {packet_id}")
 
     # Add the packet to pending acks
     with ack_lock:
-        pending_acks[packet_id] = time.time()
+        pending_acks[seq_num] = time.time()
 
 
-def send_ack(packet):
-    packet_id = packet[IP].id  # Use IP ID field
-    ack_packet = IP(dst=packet[IP].src, id=packet_id) / b"ACK"
-    send(ack_packet, verbose=0)
+# def send_ack(packet):
+#     seq_num = packet[ReliableProtocol].seq_num  # Use IP ID field
+#     ack_packet = IP(dst=packet[IP].src, id=packet_id) / b"ACK"
+#     send(ack_packet, verbose=0)
 
 
 # Thread 1 - Packet Listener
 def packet_listener():
     def packet_handler(packet):
+        packet.show()
         if packet.haslayer(IP):
             packet_id = packet[IP].id  # Use IP ID for ordering
 
             packet_buffer.put((packet_id, packet))
-            packet.show()
+            # packet.show()
             # send_ack(packet)
             # print(f"ack for packet {packet_id} sent.")
 
@@ -78,7 +93,6 @@ def resend_packets():
 def write_packet_to_file(packet):
     with write_lock:
         with open(FILE_PATH2, 'a') as f:
-            # Write the packet content to the file (raw data of the inner payload)
             inner_packet = packet[IP].payload
             if inner_packet.haslayer(Raw):
                 f.write(inner_packet[Raw].load.decode())
@@ -91,11 +105,13 @@ def packet_sender():
         data = file.read()
 
     chunks = [data[i:i + 10] for i in range(0, len(data), 10)]
-
-    for packet_id, chunk in enumerate(chunks):
+    no_more = 0
+    for seq_num, chunk in enumerate(chunks):
         if stop_threads.is_set():
             break
-        send_packet(packet_id, chunk)
+        if seq_num == len(chunks) - 1:
+            no_more = 1
+        send_packet(seq_num, chunk, no_more)
         time.sleep(PACKET_INTERVAL)
 
 
