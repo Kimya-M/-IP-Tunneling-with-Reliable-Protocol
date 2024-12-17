@@ -44,6 +44,7 @@ def packet_listener():
         if packet.haslayer(ReliableProtocol):
             seq_num = packet[ReliableProtocol].seq_num
             packet_buffer.put((seq_num, packet))
+            send_ack(packet)
 
 
     sniff(filter=f"ip and src host {INT_IP}", prn=packet_handler, store=False,
@@ -97,7 +98,12 @@ def packet_sender():
             no_more = 1
         send_packet(seq_num, chunk, no_more)
         time.sleep(PACKET_INTERVAL)
-    sender_thread.join()
+
+def send_ack(packet):
+    seq_num = packet[ReliableProtocol].seq_num
+    ack_packet = IP(dst=DEST_IP) / ReliableProtocol(seq_num=seq_num, ack_num=1)
+    send(ack_packet, verbose=0)
+    print(f"ack sent for packet {seq_num}")
 
 
 if __name__ == "__main__":
