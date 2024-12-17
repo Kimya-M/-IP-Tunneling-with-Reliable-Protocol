@@ -3,6 +3,8 @@ import threading
 import time
 from queue import PriorityQueue
 from rely_on_me import ReliableProtocol
+from you_are_unique_and_number_one import SetPriorityQueue
+import sys
 
 bind_layers(IP, ReliableProtocol, proto=253)
 # bind_layers( ReliableProtocol, Raw)
@@ -16,7 +18,7 @@ PACKET_INTERVAL = 0.1
 ACK_TIMEOUT = 2
 FILE_PATH1 = "salam.txt"
 FILE_PATH2 = "salami_dobare.txt"
-packet_buffer = PriorityQueue()
+packet_buffer = SetPriorityQueue()
 
 # Shared resources
 pending_acks = {}
@@ -43,9 +45,12 @@ def packet_listener():
         packet.show()
         if packet.haslayer(ReliableProtocol):
             seq_num = packet[ReliableProtocol].seq_num
-            packet_buffer.put((seq_num, packet))
+            packet_buffer.put(seq_num, packet)
             send_ack(packet)
-
+            if  packet[ReliableProtocol].no_more and packet_buffer.len() == seq_num + 1:
+                seq_num, packet = packet_buffer.get()
+                write_packet_to_file(packet)
+                sys.exit()
 
     sniff(filter=f"ip and src host {INT_IP}", prn=packet_handler, store=False,
           stop_filter=lambda _: stop_threads.is_set())
@@ -119,9 +124,7 @@ if __name__ == "__main__":
 
     try:
         while True:
-            if not packet_buffer.empty():
-                packet_id, packet = packet_buffer.get()
-                write_packet_to_file(packet)
+            pass
     except KeyboardInterrupt:
         print("Stopping sender threads...")
         stop_threads.set()
