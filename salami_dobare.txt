@@ -1,4 +1,1 @@
-hello!
-my name is kimya and i've recently found a zeyd.
-bye bye :D
-giligili
+the content of the received packets is written in this file
