@@ -5,14 +5,7 @@ from queue import PriorityQueue
 from rely_on_me import ReliableProtocol
 
 bind_layers(IP, ReliableProtocol, proto=253)
-#bind_layers( ReliableProtocol, Raw)
-
-
-# def reliable_protocol_next_layer(packet):
-#     if Raw in packet:
-#         return Raw
-#     else:
-#         return IP
+# bind_layers( ReliableProtocol, Raw)
 
 
 # Configuration
@@ -26,7 +19,7 @@ FILE_PATH2 = "salami_dobare.txt"
 packet_buffer = PriorityQueue()
 
 # Shared resources
-pending_acks = {}  # Dictionary to track unacknowledged packets
+pending_acks = {}
 ack_lock = threading.Lock()
 write_lock = threading.Lock()
 stop_threads = threading.Event()
@@ -36,32 +29,22 @@ def send_packet(seq_num, chunk, no_more):
     inner_packet = IP(src=INT_IP, dst=SRC_IP, id=seq_num) / ReliableProtocol(seq_num=seq_num, no_more=no_more) / Raw(
         load=chunk)
     # inner_packet.show()
-    outer_packet = IP(src=SRC_IP, dst = DEST_IP, id = seq_num, proto= 253) / ReliableProtocol(seq_num=seq_num,no_more=no_more) / inner_packet
+    outer_packet = IP(src=SRC_IP, dst=DEST_IP, id=seq_num, proto=253) / ReliableProtocol(seq_num=seq_num,
+                                                                                         no_more=no_more) / inner_packet
     send(outer_packet, verbose=0)
     # print(f"Sent packet with ID: {packet_id}")
 
-    # Add the packet to pending acks
     with ack_lock:
-        pending_acks[seq_num] = time.time()
+        pending_acks[seq_num] = (outer_packet, time.time())
 
 
-# def send_ack(packet):
-#     seq_num = packet[ReliableProtocol].seq_num  # Use IP ID field
-#     ack_packet = IP(dst=packet[IP].src, id=packet_id) / b"ACK"
-#     send(ack_packet, verbose=0)
-
-
-# Thread 1 - Packet Listener
 def packet_listener():
     def packet_handler(packet):
         packet.show()
-        if packet.haslayer(IP):
-            packet_id = packet[IP].id  # Use IP ID for ordering
+        if packet.haslayer(ReliableProtocol):
+            seq_num = packet[ReliableProtocol].seq_num
+            packet_buffer.put((seq_num, packet))
 
-            packet_buffer.put((packet_id, packet))
-            # packet.show()
-            # send_ack(packet)
-            # print(f"ack for packet {packet_id} sent.")
 
     sniff(filter=f"ip and src host {INT_IP}", prn=packet_handler, store=False,
           stop_filter=lambda _: stop_threads.is_set())
@@ -69,12 +52,12 @@ def packet_listener():
 
 def listen_for_acks():
     def ack_handler(packet):
-        if packet.haslayer(IP):
-            ack_id = packet[IP].id  # Use IP ID to identify ACK
+        if packet.haslayer(ReliableProtocol):
+            seq_num = packet[ReliableProtocol].seq_num
             with ack_lock:
-                if ack_id in pending_acks:
-                    del pending_acks[ack_id]
-                    print(f"Received ACK for packet ID: {ack_id}")
+                if seq_num in pending_acks:
+                    del pending_acks[seq_num]
+                    print(f"Received ack packet with sequence number: {seq_num}")
 
     sniff(filter=f"ip and src host {DEST_IP}", prn=ack_handler, stop_filter=lambda _: stop_threads.is_set(),
           store=False)
@@ -82,12 +65,13 @@ def listen_for_acks():
 
 def resend_packets():
     while not stop_threads.is_set():
-        time.sleep(1)
+        time.sleep(ACK_TIMEOUT)
         current_time = time.time()
         with ack_lock:
-            for packet_id, timestamp in list(pending_acks.items()):
+            for seq_num, (packet, timestamp) in pending_acks.items():
                 if current_time - timestamp > ACK_TIMEOUT:
-                    print(f"Resending packet with ID: {packet_id}")
+                    print(f"Resending packet with sequence number: {seq_num}")
+                    send(packet, verbose=0)
 
 
 def write_packet_to_file(packet):
@@ -113,22 +97,22 @@ def packet_sender():
             no_more = 1
         send_packet(seq_num, chunk, no_more)
         time.sleep(PACKET_INTERVAL)
+    sender_thread.join()
 
 
 if __name__ == "__main__":
     sender_thread = threading.Thread(target=packet_sender, daemon=True)
-    # ack_listener_thread = threading.Thread(target=listen_for_acks, daemon=True)
+    ack_listener_thread = threading.Thread(target=listen_for_acks, daemon=True)
     receiver_thread = threading.Thread(target=packet_listener, daemon=True)
-    # resend_thread = threading.Thread(target=resend_packets, daemon=True)
+    resend_thread = threading.Thread(target=resend_packets, daemon=True)
 
     sender_thread.start()
-    # ack_listener_thread.start()
+    ack_listener_thread.start()
     receiver_thread.start()
-    # resend_thread.start()
+    resend_thread.start()
 
     try:
         while True:
-            # Process packets from the buffer and write to file in order
             if not packet_buffer.empty():
                 packet_id, packet = packet_buffer.get()
                 write_packet_to_file(packet)
@@ -138,5 +122,8 @@ if __name__ == "__main__":
 
     sender_thread.join()
     receiver_thread.join()
+    ack_listener_thread.join()
+    resend_thread.join()
+
 
     print("Sender stopped.")
