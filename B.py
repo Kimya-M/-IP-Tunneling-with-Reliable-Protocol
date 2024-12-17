@@ -62,7 +62,7 @@ def process_packet(packet):
         inner_payload = inner_ip_packet.payload
         
         #print(f"Received data: {inner_payload}")
-        #real_inner_packet.show()
+        real_inner_packet.show()
         send(real_inner_packet)
         #print("inner packet sent")
         with ack_lock:

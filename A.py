@@ -3,7 +3,6 @@ import threading
 import time
 from queue import PriorityQueue
 from rely_on_me import ReliableProtocol
-from you_are_unique_and_number_one import SetPriorityQueue
 import sys
 
 bind_layers(IP, ReliableProtocol, proto=253)
@@ -18,7 +17,7 @@ PACKET_INTERVAL = 0.1
 ACK_TIMEOUT = 2
 FILE_PATH1 = "salam.txt"
 FILE_PATH2 = "salami_dobare.txt"
-packet_buffer = SetPriorityQueue()
+packet_buffer = PriorityQueue()
 
 # Shared resources
 pending_acks = {}
@@ -45,7 +44,8 @@ def packet_listener():
         packet.show()
         if packet.haslayer(ReliableProtocol):
             seq_num = packet[ReliableProtocol].seq_num
-            packet_buffer.put(seq_num, packet)
+            if seq_num not in packet_buffer:
+                packet_buffer.put(seq_num, packet)
             send_ack(packet)
             if  packet[ReliableProtocol].no_more and packet_buffer.len() == seq_num + 1:
                 seq_num, packet = packet_buffer.get()
