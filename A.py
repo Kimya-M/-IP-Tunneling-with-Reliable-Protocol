@@ -1,9 +1,10 @@
+import heapq
+
 from scapy.all import IP, send, sniff, Raw, bind_layers
 import threading
 import time
 from queue import PriorityQueue
 from rely_on_me import ReliableProtocol
-import sys
 
 bind_layers(IP, ReliableProtocol, proto=253)
 # bind_layers( ReliableProtocol, Raw)
@@ -17,7 +18,9 @@ PACKET_INTERVAL = 0.1
 ACK_TIMEOUT = 2
 FILE_PATH1 = "salam.txt"
 FILE_PATH2 = "salami_dobare.txt"
-packet_buffer = PriorityQueue()
+# packet_buffer = PriorityQueue()
+packet_buffer = []  # Using heapq as the priority queue
+heapq.heapify(packet_buffer)
 
 # Shared resources
 pending_acks = {}
@@ -39,18 +42,26 @@ def send_packet(seq_num, chunk, no_more):
         pending_acks[seq_num] = (outer_packet, time.time())
 
 
+length = -1
+
+
 def packet_listener():
     def packet_handler(packet):
-        packet.show()
+        global length
+        #packet.show()
         if packet.haslayer(ReliableProtocol):
             seq_num = packet[ReliableProtocol].seq_num
-            if seq_num not in packet_buffer:
-                packet_buffer.put(seq_num, packet)
+            # packet_buffer.put((seq_num, packet))
+            if (seq_num, packet) not in packet_buffer:
+                heapq.heappush(packet_buffer, (seq_num, packet))
             send_ack(packet)
-            if  packet[ReliableProtocol].no_more and packet_buffer.len() == seq_num + 1:
-                seq_num, packet = packet_buffer.get()
-                write_packet_to_file(packet)
-                sys.exit()
+            if packet[ReliableProtocol].no_more == 1:
+                length = packet[ReliableProtocol].seq_num
+                print("hey length now is ",length)
+
+            if len(packet_buffer) == length + 1:
+                print("hi")
+                write_packet_to_file()
 
     sniff(filter=f"ip and src host {INT_IP}", prn=packet_handler, store=False,
           stop_filter=lambda _: stop_threads.is_set())
@@ -80,14 +91,17 @@ def resend_packets():
                     send(packet, verbose=0)
 
 
-def write_packet_to_file(packet):
+def write_packet_to_file():
     with write_lock:
         with open(FILE_PATH2, 'a') as f:
-            inner_packet = packet[IP].payload
-            if inner_packet.haslayer(Raw):
-                f.write(inner_packet[Raw].load.decode())
-            else:
-                f.write("No Raw Data\n")
+            while packet_buffer:
+                _,packet = heapq.heappop(packet_buffer)
+                packet.show()
+                inner_packet = packet[IP].payload
+                if inner_packet.haslayer(Raw):
+                    f.write(inner_packet[Raw].load.decode())
+                else:
+                    f.write("No Raw Data\n")
 
 
 def packet_sender():
@@ -103,6 +117,7 @@ def packet_sender():
             no_more = 1
         send_packet(seq_num, chunk, no_more)
         time.sleep(PACKET_INTERVAL)
+
 
 def send_ack(packet):
     seq_num = packet[ReliableProtocol].seq_num
@@ -133,6 +148,5 @@ if __name__ == "__main__":
     receiver_thread.join()
     ack_listener_thread.join()
     resend_thread.join()
-
 
     print("Sender stopped.")
