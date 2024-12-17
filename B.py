@@ -12,26 +12,28 @@ bind_layers(ReliableProtocol, IP)
 packet_buffer = PriorityQueue()
 buffer_lock = threading.Lock()
 
-# Global flag to stop threads
+
 stop_threads = threading.Event()
+#configuration 
 SRC_IP = "192.168.43.222"
 DEST_IP = "192.168.43.181"
 
 # Function to send an acknowledgment
 def send_ack(packet):
-    packet_id = packet[IP].id  # Use IP ID field
-    ack_packet = IP(dst=packet[IP].src, id=packet_id) / b"ACK"
-    send(ack_packet, verbose=0)
+    seq_num = packet[ReliableProtocol].seq_num
+    if seq_num !=1:
+        ack_packet = IP(dst=packet[IP].src) / ReliableProtocol(seq_num=seq_num)
+        send(ack_packet, verbose=0)
+        print(f"ack sent for packet {seq_num}")
 
 # Thread 1 - Packet Listener
 def packet_listener():
     def packet_handler(packet):
-        if packet.haslayer(IP):
-            packet_id = packet[IP].id  # Use IP ID for ordering
+        if packet.haslayer(ReliableProtocol):
+            seq_num = packet[ReliableProtocol].seq_num 
             with buffer_lock:
-                packet_buffer.put((packet_id, packet))
-            #send_ack(packet)
-            #print(f"ack for packet {packet_id} sent.")
+                packet_buffer.put((seq_num, packet))
+            send_ack(packet)
 
     sniff(filter=f"ip and src host {DEST_IP}", prn=packet_handler, store=False, stop_filter=lambda _: stop_threads.is_set())
 
