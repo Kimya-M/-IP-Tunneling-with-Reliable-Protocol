@@ -64,13 +64,13 @@ This project implements a simple IP tunneling system that transmits data reliabl
 - Start the **receiver** first. This can be done by running the `receiver.py` script:
 
     ```bash
-    python receiver.py
+    python B.py
     ```
 
 - Then start the **sender** by running the `sender.py` script:
 
     ```bash
-    python sender.py
+    python A.py
     ```
 
 ### 3. **Stop the Process**:
